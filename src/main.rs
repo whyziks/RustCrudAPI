@@ -31,10 +31,17 @@ struct TaskPatch{
 	completed: Option<bool>,
 }
 //REQUEST-FUNCTIONS
-async fn tasks_get()->Json<Vec<Task>>{
+async fn tasks_get()->Result<Json<Vec<Task>>,StatusCode>{
 	let mut vec:Vec<Task> = Vec::new();
 	let mut out = String::new();
-	let mut db = tokio::fs::read_to_string("db.txt").await.unwrap();
+	let mut db = match tokio::fs::read_to_string("db.txt").await{
+		Ok(x) => x,
+		Err(_) => {println!("DB NOT FOUND"); return Err(StatusCode::INTERNAL_SERVER_ERROR)}
+	};
+	match validate_db(&db){
+		Ok(_)=>{println!("DB IS VALIDATED");},
+		Err(x)=>{println!("{}",x); return Err(StatusCode::INTERNAL_SERVER_ERROR)},
+	}
 	for line in db.lines(){
 		if line.trim().is_empty(){continue}
 		let mut iter = line.trim().split("|");
@@ -43,7 +50,7 @@ async fn tasks_get()->Json<Vec<Task>>{
 			completed:iter.next().unwrap().parse::<bool>().unwrap()
 		});
 	}
-	Json(vec)
+	Ok(Json(vec))
 	
 }
 async fn task_create(Json(payload):Json<TaskCreate>)->StatusCode{
@@ -124,4 +131,26 @@ async fn patch_task(Path(id):Path<String>,Json(payload):Json<TaskPatch>)->Status
 		return StatusCode::OK
 	}
 	else{return StatusCode::NOT_FOUND}
-}	
+}
+fn validate_db(db:&str)->Result<(),String>{
+	for (i, line) in db.lines().enumerate(){
+		let mut vec:Vec<&str> = line.trim().split("|").collect();
+		if line.trim().is_empty(){
+			continue;
+		}
+		if vec.len()!=3{
+			return Err(format!("line {i}: LESS OR MORE FIELDS IN LINE THAN EXPECTED"));
+		}
+		match Uuid::parse_str(vec[0]){
+			Ok(_)=>"id is correct",
+			Err(_)=> return Err(format!("line {i}: ONE OF THE LINES CONTAINS INCORRECT ID")),		
+		};
+		if vec[1].trim() == ""{
+			return Err(format!("line {i}: ONE OF THE LINES CONTAINS BLANK NAME"))
+		}
+		if vec[2] != "true" && vec[2]!= "false"{
+			return Err(format!("line {i}: ONE OF THE LINES CONTAINS NON-BOOLEAN EXPRESSION IN COMPLETED FIELD"));
+		}
+	}
+	return Ok(())
+}
